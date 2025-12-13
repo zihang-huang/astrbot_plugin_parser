@@ -292,35 +292,36 @@ class ParserPlugin(Star):
 
         logger.debug(f"匹配结果: {keyword}, {searched}")
 
-        async def job() -> list[BaseMessageComponent]:
-            parse_res = await self.parser_map[keyword].parse(keyword, searched)  # 解析
-            return await self.make_messages(parse_res) # 渲染
-
         # 任务
-        task = asyncio.create_task(job())
+        task = asyncio.create_task(self.job(event, keyword, searched))
         self.running_tasks[umo] = task
         try:
-            segs = await task  # 这里可能被 cancel
+            await task
         except asyncio.CancelledError:
-            logger.debug(f"解析/渲染任务被取消 - {umo}")
+            logger.debug(f"任务被取消 - {umo}")
             return
         finally:
             self.running_tasks.pop(umo, None)
 
-        # 合并转发
+    async def job(self, event: AstrMessageEvent, keyword: str, searched: re.Match[str]):
+        """一个任务包：解析+渲染+合并+发送"""
+        # 解析
+        parse_res = await self.parser_map[keyword].parse(keyword, searched)
+        # 渲染
+        segs = await self.make_messages(parse_res)
+        # 合并
         if len(segs) >= self.config["forward_threshold"]:
             nodes = Nodes([])
+            self_id = event.get_self_id()
             name = "解析器"
             for seg in segs:
                 node = Node(uin=self_id, name=name, content=[seg])
                 nodes.nodes.append(node)
             segs.clear()
             segs.append(nodes)
-
-        # 发送消息
+        # 发送
         if segs:
-            yield event.chain_result(segs)
-
+            await event.send(event.chain_result(segs))
 
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("bm")

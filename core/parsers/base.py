@@ -13,7 +13,18 @@ from typing_extensions import Unpack
 from astrbot.core.config.astrbot_config import AstrBotConfig
 
 from ..constants import ANDROID_HEADER, COMMON_HEADER, IOS_HEADER
-from ..data import ParseResult, ParseResultKwargs, Platform
+from ..data import (
+    AudioContent,
+    Author,
+    DynamicContent,
+    FileContent,
+    GraphicsContent,
+    ImageContent,
+    ParseResult,
+    ParseResultKwargs,
+    Platform,
+    VideoContent,
+)
 from ..download import Downloader
 from ..exception import ParseException
 
@@ -189,7 +200,6 @@ class BaseParser:
         description: str | None = None,
     ):
         """创建作者对象"""
-        from .data import Author
 
         avatar_task = None
         if avatar_url:
@@ -205,8 +215,6 @@ class BaseParser:
         duration: float = 0.0,
     ):
         """创建视频内容"""
-        from .data import VideoContent
-
         cover_task = None
         if cover_url:
             cover_task = self.downloader.download_img(
@@ -224,8 +232,6 @@ class BaseParser:
         image_urls: list[str],
     ):
         """创建图片内容列表"""
-        from .data import ImageContent
-
         contents: list[ImageContent] = []
         for url in image_urls:
             task = self.downloader.download_img(url, ext_headers=self.headers)
@@ -237,8 +243,6 @@ class BaseParser:
         dynamic_urls: list[str],
     ):
         """创建动态图片内容列表"""
-        from .data import DynamicContent
-
         contents: list[DynamicContent] = []
         for url in dynamic_urls:
             task = self.downloader.download_video(url, ext_headers=self.headers)
@@ -251,8 +255,6 @@ class BaseParser:
         duration: float = 0.0,
     ):
         """创建音频内容"""
-        from .data import AudioContent
-
         if isinstance(url_or_task, str):
             url_or_task = self.downloader.download_audio(
                 url_or_task, ext_headers=self.headers
@@ -267,8 +269,6 @@ class BaseParser:
         alt: str | None = None,
     ):
         """创建图文内容 图片不能为空 文字可空 渲染时文字在前 图片在后"""
-        from .data import GraphicsContent
-
         image_task = self.downloader.download_img(image_url, ext_headers=self.headers)
         return GraphicsContent(image_task, text, alt)
 
@@ -278,8 +278,6 @@ class BaseParser:
         name: str | None = None,
     ):
         """创建文件内容"""
-        from .data import FileContent
-
         if isinstance(url_or_task, str):
             url_or_task = self.downloader.download_file(
                 url_or_task, ext_headers=self.headers, file_name=name
