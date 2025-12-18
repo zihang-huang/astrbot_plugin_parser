@@ -94,6 +94,7 @@ class ParserPlugin(Star):
         # 缓存清理器
         self.cleaner = CacheCleaner(self.context, self.config)
 
+    # region 生命周期
 
     async def initialize(self):
         """加载、重载插件时触发"""
@@ -112,9 +113,30 @@ class ParserPlugin(Star):
         # 加载资源
         await asyncio.to_thread(Renderer.load_resources)
         # 注册解析器
-        self.register_parser()
+        self._register_parser()
 
-    def register_parser(self):
+    async def terminate(self):
+        """插件卸载时触发"""
+        # 取消所有解析任务
+        for task in list(self.running_tasks.values()):
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*self.running_tasks.values(), return_exceptions=True)
+        self.running_tasks.clear()
+        # 关下载器里的会话
+        await self.downloader.close()
+        # 关所有解析器里的会话 (去重后的实例)
+        unique_parsers = set(self.parser_map.values())
+        for parser in unique_parsers:
+            await parser.close_session()
+        # 关缓存清理器
+        await self.cleaner.stop()
+
+    # endregion
+
+    # region 内部方法
+
+    def _register_parser(self):
         """注册解析器"""
         # 获取所有解析器
         all_subclass = BaseParser.get_all_subclass()
@@ -145,13 +167,13 @@ class ParserPlugin(Star):
         logger.debug(f"关键词-正则对已生成：{keywords}")
         self.key_pattern_list = patterns
 
-    def get_parser_by_type(self, parser_type):
+    def _get_parser_by_type(self, parser_type):
         for parser in self.parser_map.values():
             if isinstance(parser, parser_type):
                 return parser
         raise ValueError(f"未找到类型为 {parser_type} 的 parser 实例")
 
-    async def make_messages(self, result: ParseResult) -> list[BaseMessageComponent]:
+    async def _make_messages(self, result: ParseResult) -> list[BaseMessageComponent]:
         """组装消息"""
         segs: list[BaseMessageComponent] = []
 
@@ -213,6 +235,10 @@ class ParserPlugin(Star):
             segs.append(Plain(f"{failed} 项媒体下载失败"))
 
         return segs
+
+    # endregion
+
+    # region 事件处理
 
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def on_message(self, event: AstrMessageEvent):
@@ -287,7 +313,7 @@ class ParserPlugin(Star):
         # 解析
         parse_res = await self.parser_map[keyword].parse(keyword, searched)
         # 渲染
-        segs = await self.make_messages(parse_res)
+        segs = await self._make_messages(parse_res)
         # 合并
         if len(segs) >= self.config["forward_threshold"]:
             nodes = Nodes([])
@@ -304,6 +330,10 @@ class ParserPlugin(Star):
                 await event.send(event.chain_result(segs))
             except Exception as e:
                 logger.error(f"发送消息失败: {e}")
+
+    # endregion
+
+    # region 插件命令
 
     @filter.permission_type(filter.PermissionType.ADMIN)
     @filter.command("bm")
@@ -340,7 +370,7 @@ class ParserPlugin(Star):
     async def ym(self, event: AstrMessageEvent):
         """获取油管的音频"""
         text = event.message_str
-        parser = self.get_parser_by_type(YouTubeParser)
+        parser = self._get_parser_by_type(YouTubeParser)
         _, matched = parser.search_url(text)
         if not matched:
             yield event.plain_result("请发送正确的油管链接")
@@ -386,19 +416,5 @@ class ParserPlugin(Star):
         else:
             yield event.plain_result("解析已关闭，无需重复关闭")
 
-    async def terminate(self):
-        """插件卸载时"""
-        # 取消所有解析任务
-        for task in list(self.running_tasks.values()):
-            if not task.done():
-                task.cancel()
-        await asyncio.gather(*self.running_tasks.values(), return_exceptions=True)
-        self.running_tasks.clear()
-        # 关下载器里的会话
-        await self.downloader.close()
-        # 关所有解析器里的会话 (去重后的实例)
-        unique_parsers = set(self.parser_map.values())
-        for parser in unique_parsers:
-            await parser.close_session()
-        # 关缓存清理器
-        await self.cleaner.stop()
+    # endregion
+
