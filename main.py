@@ -257,7 +257,7 @@ class ParserPlugin(Star):
         logger.debug(f"匹配结果: {keyword}, {searched}")
 
         # 仲裁机制
-        if isinstance(event, AiocqhttpMessageEvent):
+        if isinstance(event, AiocqhttpMessageEvent) and not event.is_private_chat():
             raw = event.message_obj.raw_message
             if not isinstance(raw, dict):
                 logger.warning(f"Unexpected raw_message type: {type(raw)}")
