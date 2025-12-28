@@ -30,8 +30,18 @@ class DouyinParser(BaseParser):
         self._cookies_file = Path(config["data_dir"]) / "douyin_cookies.json"
         self._load_cookies()
         if self.douyin_ck:
-            self.ios_headers["Cookie"] = self.douyin_ck
-            self.android_headers["Cookie"] = self.douyin_ck
+            self._set_cookies(self.douyin_ck)
+
+    def _clean_cookie(self, cookie: str) -> str:
+        """清理cookie中的换行符和回车符"""
+        return cookie.replace("\n", "").replace("\r", "").strip()
+
+    def _set_cookies(self, cookies: str):
+        """设置cookie到请求头"""
+        cleaned_cookies = self._clean_cookie(cookies)
+        if cleaned_cookies:
+            self.ios_headers["Cookie"] = cleaned_cookies
+            self.android_headers["Cookie"] = cleaned_cookies
 
     def _load_cookies(self):
         """从文件加载抖音 cookies"""
@@ -42,8 +52,7 @@ class DouyinParser(BaseParser):
             cookies_data = json.loads(self._cookies_file.read_text())
             self.douyin_ck = cookies_data.get("cookie", "")
             if self.douyin_ck:
-                self.ios_headers["Cookie"] = self.douyin_ck
-                self.android_headers["Cookie"] = self.douyin_ck
+                self._set_cookies(self.douyin_ck)
                 logger.info(f"已从 {self._cookies_file} 加载抖音 cookies")
         except Exception as e:
             logger.warning(f"加载抖音 cookies 失败: {e}")
@@ -82,8 +91,7 @@ class DouyinParser(BaseParser):
 
         if new_cookies != self.douyin_ck:
             self.douyin_ck = new_cookies
-            self.ios_headers["Cookie"] = self.douyin_ck
-            self.android_headers["Cookie"] = self.douyin_ck
+            self._set_cookies(self.douyin_ck)
             self._save_cookies(self.douyin_ck)
     # https://v.douyin.com/_2ljF4AmKL8
     @handle("v.douyin", r"v\.douyin\.com/[a-zA-Z0-9_\-]+")
