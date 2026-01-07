@@ -77,6 +77,7 @@ class BaseParser:
         self.ios_headers = IOS_HEADER.copy()
         self.android_headers = ANDROID_HEADER.copy()
         self.config = config
+        self.data_dir = Path(config["data_dir"])
         self.downloader = downloader
         # Proxy only applies to YouTube and TikTok as per configuration
         proxy_enabled_platforms = ["youtube", "tiktok"]

@@ -17,7 +17,7 @@ from ..base import (
 )
 
 if TYPE_CHECKING:
-    from ..data import ParseResult
+    from ...data import ParseResult
 
 
 class DouyinParser(BaseParser):
@@ -100,9 +100,9 @@ class DouyinParser(BaseParser):
             self.douyin_ck = new_cookies
             self._set_cookies(self.douyin_ck)
             self._save_cookies(self.douyin_ck)
-            logger.debug(f"[抖音] Cookies 已更新并保存")
+            logger.debug("[抖音] Cookies 已更新并保存")
         else:
-            logger.debug(f"[抖音] Cookies 无变化")
+            logger.debug("[抖音] Cookies 无变化")
     # https://v.douyin.com/_2ljF4AmKL8
     @handle("v.douyin", r"v\.douyin\.com/[a-zA-Z0-9_\-]+")
     @handle("jx.douyin", r"jx\.douyin\.com/[a-zA-Z0-9_\-]+")
@@ -208,10 +208,10 @@ class DouyinParser(BaseParser):
         matched = pattern.search(text)
 
         if not matched or not matched.group(1):
-            logger.debug(f"[抖音] 未在HTML中找到 window._ROUTER_DATA")
+            logger.debug("[抖音] 未在HTML中找到 window._ROUTER_DATA")
             raise ParseException("can't find _ROUTER_DATA in html")
 
-        logger.debug(f"[抖音] 成功提取 window._ROUTER_DATA")
+        logger.debug("[抖音] 成功提取 window._ROUTER_DATA")
 
         from .video import RouterData
 

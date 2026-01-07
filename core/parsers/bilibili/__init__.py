@@ -67,6 +67,21 @@ class BilibiliParser(BaseParser):
 
         return await self.parse_video(bvid=bvid, page_num=page_num)
 
+    @handle("bm", r"^bm(?P<bvid>BV[0-9a-zA-Z]{10})(?:\s(?P<page_num>\d{1,3}))?$")
+    async def _parse_bv_bm(self, searched: Match[str]):
+        bvid = searched.group("bvid")
+        page = int(searched.group("page_num") or 1)
+        _, a_url = await self.extract_download_urls(bvid=bvid, page_index=page - 1)
+        if not a_url:
+            raise ParseException("未找到音频链接")
+        audio = self.create_audio_content(a_url)
+        return self.result(
+            title=f"BiliBili_audio_{bvid}",
+            contents=[audio],
+            url=a_url,
+        )
+
+
     @handle("av", r"^av(?P<avid>\d{6,})(?:\s)?(?P<page_num>\d{1,3})?$")
     @handle("/av", r"bilibili\.com(?:/video)?/av(?P<avid>\d{6,})(?:\?p=(?P<page_num>\d{1,3}))?")
     async def _parse_av(self, searched: Match[str]):
@@ -179,6 +194,7 @@ class BilibiliParser(BaseParser):
             contents=[video_content],
             extra={"info": ai_summary},
         )
+
 
     async def parse_dynamic(self, dynamic_id: int):
         """解析动态信息

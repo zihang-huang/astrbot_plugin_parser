@@ -2,37 +2,44 @@
 
 import time
 
-from astrbot.core.config.astrbot_config import AstrBotConfig
 
-
-class LinkDebouncer:
+class Debouncer:
     """
-    会话级链接防抖器。
-    用法：
-        debouncer = LinkDebouncer(interval=10)
-        if debouncer.hit(session_id, link):   # 最近出现过
-            return
-        # 真正处理
+    会话级防抖器
+    - 支持 link 防抖
+    - 支持 resource_id 防抖
     """
 
-    def __init__(self, config: AstrBotConfig):
+    def __init__(self, config: dict):
         self.interval = config["debounce_interval"]
-        self._cache: dict[str, dict[str, float]] = {}  # {session: {link: ts}}
+        self._cache: dict[str, dict[str, float]] = {}  # {session: {key: ts}}
 
-    def hit(self, session: str, link: str) -> bool:
-        """返回 True 表示命中防抖，应跳过"""
+    def _hit(self, session: str, key: str) -> bool:
+        # 禁用
+        if self.interval <= 0:
+            return False
+
         now = time.time()
         bucket = self._cache.setdefault(session, {})
 
         # 1. 清理过期
+        expire = now - self.interval
         for k, ts in list(bucket.items()):
-            if now - ts > self.interval:
+            if ts < expire:
                 bucket.pop(k, None)
 
-        # 2. 检查是否已存在
-        if link in bucket:
+        # 2. 命中判断
+        if key in bucket:
             return True
 
-        # 3. 记录本次时间
-        bucket[link] = now
+        # 3. 记录
+        bucket[key] = now
         return False
+
+    def hit_link(self, session: str, link: str) -> bool:
+        """基于 link 的防抖"""
+        return self._hit(session, f"link:{link}")
+
+    def hit_resource(self, session: str, resource_id: str) -> bool:
+        """基于资源 ID 的防抖"""
+        return self._hit(session, f"res:{resource_id}")

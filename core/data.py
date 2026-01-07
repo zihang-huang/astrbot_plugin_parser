@@ -1,3 +1,4 @@
+import hashlib
 from asyncio import Task
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -166,7 +167,8 @@ class ParseResult:
     """转发的内容"""
     render_image: Path | None = None
     """渲染图片"""
-
+    _resource_id: str | None = field(default=None, init=False, repr=False)
+    """资源 ID"""
     @property
     def header(self) -> str | None:
         """头信息 仅用于 default render"""
@@ -243,6 +245,51 @@ class ParseResult:
             f"repost: <<<<<<<{self.repost}>>>>>>, "
             f"render_image: {self.render_image.name if self.render_image else 'None'}"
         )
+
+    def get_resource_id(self) -> str:
+        """
+        轻量、稳定、无 IO 的资源指纹
+        用于判断是否为同一渲染输入
+        """
+        if self._resource_id is not None:
+            return self._resource_id
+
+        h = hashlib.blake2b(digest_size=8)
+
+        def add(v: object | None):
+            if v is not None:
+                h.update(str(v).encode("utf-8"))
+            h.update(b"|")
+
+        add(self.platform.name)
+        add(self.url)
+        add(self.timestamp)
+        if self.author:
+            add(self.author.name)
+
+        # ---------- 内容结构 ----------
+        add(len(self.contents))
+        for cont in self.contents:
+            add(cont.__class__.__name__)
+
+            # 子类补充（仍然是 O(1)）
+            if isinstance(cont, VideoContent):
+                add(cont.duration)
+            elif isinstance(cont, AudioContent):
+                add(cont.duration)
+            elif isinstance(cont, FileContent):
+                add(cont.name)
+            elif isinstance(cont, GraphicsContent):
+                add(cont.text)
+                add(cont.alt)
+
+        # ---------- 转发 ----------
+        if self.repost:
+            add(self.repost.get_resource_id())
+
+        self._resource_id = h.hexdigest()
+        return self._resource_id
+
 
 
 class ParseResultKwargs(TypedDict, total=False):

@@ -79,6 +79,7 @@ class Downloader:
         self.client = ClientSession(
             timeout=ClientTimeout(total=config["download_timeout"])
         )
+
     @auto_task
     async def streamd(
         self,
@@ -111,7 +112,7 @@ class Downloader:
             return file_path
 
         headers = {**self.headers, **(ext_headers or {})}
-        
+
         # Use sentinel value to detect if proxy was explicitly passed
         if proxy is ...:
             proxy = self.proxy
@@ -121,9 +122,7 @@ class Downloader:
                 url, headers=headers, allow_redirects=True, proxy=proxy
             ) as response:
                 if response.status >= 400:
-                    raise ClientError(
-                        f"HTTP {response.status} {response.reason}"
-                    )
+                    raise ClientError(f"HTTP {response.status} {response.reason}")
                 content_length = response.headers.get("Content-Length")
                 content_length = int(content_length) if content_length else 0
 
@@ -201,7 +200,9 @@ class Downloader:
 
         if video_name is None:
             video_name = generate_file_name(url, ".mp4")
-        return await self.streamd(url, file_name=video_name, ext_headers=ext_headers, proxy=proxy)
+        return await self.streamd(
+            url, file_name=video_name, ext_headers=ext_headers, proxy=proxy
+        )
 
     @auto_task
     async def download_audio(
@@ -233,7 +234,9 @@ class Downloader:
 
         if audio_name is None:
             audio_name = generate_file_name(url, ".mp3")
-        return await self.streamd(url, file_name=audio_name, ext_headers=ext_headers, proxy=proxy)
+        return await self.streamd(
+            url, file_name=audio_name, ext_headers=ext_headers, proxy=proxy
+        )
 
     @auto_task
     async def download_file(
@@ -245,7 +248,7 @@ class Downloader:
         proxy: str | None | object = ...,
     ) -> Path:
         """download file by url with stream
-        
+
         Args:
             url (str): url address
             file_name (str | None): file name. Defaults to None.
@@ -257,7 +260,9 @@ class Downloader:
         """
         if file_name is None:
             file_name = generate_file_name(url, ".zip")
-        return await self.streamd(url, file_name=file_name, ext_headers=ext_headers, proxy=proxy)
+        return await self.streamd(
+            url, file_name=file_name, ext_headers=ext_headers, proxy=proxy
+        )
 
     @auto_task
     async def download_img(
@@ -284,7 +289,9 @@ class Downloader:
         """
         if img_name is None:
             img_name = generate_file_name(url, ".jpg")
-        return await self.streamd(url, file_name=img_name, ext_headers=ext_headers, proxy=proxy)
+        return await self.streamd(
+            url, file_name=img_name, ext_headers=ext_headers, proxy=proxy
+        )
 
     async def download_imgs_without_raise(
         self,
@@ -304,7 +311,10 @@ class Downloader:
             list[Path]: image file paths
         """
         paths_or_errs = await asyncio.gather(
-            *[self.download_img(url, ext_headers=ext_headers, proxy=proxy) for url in urls],
+            *[
+                self.download_img(url, ext_headers=ext_headers, proxy=proxy)
+                for url in urls
+            ],
             return_exceptions=True,
         )
         return [p for p in paths_or_errs if isinstance(p, Path)]
@@ -320,7 +330,7 @@ class Downloader:
         proxy: str | None | object = ...,
     ) -> Path:
         """download video and audio file by url with stream and merge
-        
+
         Args:
             v_url (str): video url
             a_url (str): audio url

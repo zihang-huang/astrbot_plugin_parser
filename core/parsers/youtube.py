@@ -9,6 +9,7 @@ from msgspec import Struct
 from astrbot.core.config.astrbot_config import AstrBotConfig
 
 from ..download import Downloader
+from ..utils import save_cookies_with_netscape
 from .base import BaseParser, Platform, handle
 
 
@@ -20,7 +21,19 @@ class YouTubeParser(BaseParser):
         super().__init__(config, downloader)
         self.ytb_cookies_file = Path(self.config["ytb_cookies_file"]) or None
         self.max_duration = config["source_max_minute"] * 60
+        self._set_cookies()
 
+    def _set_cookies(self):
+        if self.config["ytb_ck"]:
+            ytb_cookies_file = self.data_dir / "ytb_cookies.txt"
+            ytb_cookies_file.parent.mkdir(parents=True, exist_ok=True)
+            save_cookies_with_netscape(
+                self.config["ytb_ck"],
+                ytb_cookies_file,
+                "youtube.com",
+            )
+            self.config["ytb_cookies_file"] = str(ytb_cookies_file)
+            self.config.save_config()
     @handle("youtu.be", r"https?://(?:www\.)?youtu\.be/[A-Za-z\d\._\?%&\+\-=/#]+")
     @handle(
         "youtube.com",
@@ -60,17 +73,16 @@ class YouTubeParser(BaseParser):
             timestamp=video_info.timestamp,
         )
 
-    async def parse_audio(self, url: str):
-        """解析 YouTube URL 并标记为音频下载
-
-        Args:
-            url: YouTube 链接
-
-        Returns:
-            ParseResult: 解析结果（音频内容）
-
-        """
-        video_info = await self.downloader.ytdlp_extract_info(url, self.ytb_cookies_file)
+    @handle(
+        "ym",
+        r"^ym(?P<url>https?://(?:www\.)?(youtu\.be/[A-Za-z\d_-]+|youtube\.com/(?:watch|shorts)(?:\?v=[A-Za-z\d_-]+|/[A-Za-z\d_-]+)))",
+    )
+    async def ym(self, searched: re.Match[str]):
+        """获取油管的音频(需加ym前缀)"""
+        url = searched.group("url")
+        video_info = await self.downloader.ytdlp_extract_info(
+            url, self.ytb_cookies_file
+        )
         author = await self._fetch_author_info(video_info.channel_id)
 
         contents = []
@@ -80,7 +92,9 @@ class YouTubeParser(BaseParser):
             audio_task = self.downloader.download_audio(
                 url, use_ytdlp=True, cookiefile=self.ytb_cookies_file, proxy=self.proxy
             )
-            contents.append(self.create_audio_content(audio_task, duration=video_info.duration))
+            contents.append(
+                self.create_audio_content(audio_task, duration=video_info.duration)
+            )
 
         return self.result(
             title=video_info.title,
@@ -123,9 +137,6 @@ class YouTubeParser(BaseParser):
             browse = msgspec.json.decode(await resp.read(), type=BrowseResponse)
 
         return self.create_author(browse.name, browse.avatar_url, browse.description)
-
-
-
 
 
 class Thumbnail(Struct):

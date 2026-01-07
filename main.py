@@ -3,25 +3,13 @@
 import asyncio
 import re
 from concurrent.futures import ThreadPoolExecutor
-from itertools import chain
 from pathlib import Path
 
 from astrbot.api import logger
 from astrbot.api.event import filter
 from astrbot.api.star import Context, Star, StarTools
 from astrbot.core import AstrBotConfig
-from astrbot.core.message.components import (
-    At,
-    BaseMessageComponent,
-    File,
-    Image,
-    Json,
-    Node,
-    Nodes,
-    Plain,
-    Record,
-    Video,
-)
+from astrbot.core.message.components import At, Image, Json
 from astrbot.core.platform.astr_message_event import AstrMessageEvent
 from astrbot.core.platform.sources.aiocqhttp.aiocqhttp_message_event import (
     AiocqhttpMessageEvent,
@@ -29,30 +17,12 @@ from astrbot.core.platform.sources.aiocqhttp.aiocqhttp_message_event import (
 
 from .core.arbiter import ArbiterContext, EmojiLikeArbiter
 from .core.clean import CacheCleaner
-from .core.data import (
-    AudioContent,
-    DynamicContent,
-    FileContent,
-    GraphicsContent,
-    ImageContent,
-    ParseResult,
-    VideoContent,
-)
-from .core.debounce import LinkDebouncer
+from .core.debounce import Debouncer
 from .core.download import Downloader
-from .core.exception import (
-    DownloadException,
-    DownloadLimitException,
-    SizeLimitException,
-    ZeroSizeException,
-)
-from .core.parsers import (
-    BaseParser,
-    BilibiliParser,
-    YouTubeParser,
-)
+from .core.parsers import BaseParser, BilibiliParser
 from .core.render import Renderer
-from .core.utils import extract_json_url, save_cookies_with_netscape
+from .core.sender import MessageSender
+from .core.utils import extract_json_url
 
 
 class ParserPlugin(Star):
@@ -85,31 +55,20 @@ class ParserPlugin(Star):
         self.downloader = Downloader(config)
 
         # 防抖器
-        self.debouncer = LinkDebouncer(config)
+        self.debouncer = Debouncer(config)
 
         # 仲裁器
         self.arbiter = EmojiLikeArbiter()
 
+        # 消息发送器
+        self.sender = MessageSender(config, self.renderer)
+
         # 缓存清理器
         self.cleaner = CacheCleaner(self.context, self.config)
 
-    # region 生命周期
-
     async def initialize(self):
         """加载、重载插件时触发"""
-        # ytb_cookies
-        if self.config["ytb_ck"]:
-            ytb_cookies_file = self.data_dir / "ytb_cookies.txt"
-            ytb_cookies_file.parent.mkdir(parents=True, exist_ok=True)
-            await asyncio.to_thread(
-                save_cookies_with_netscape,
-                self.config["ytb_ck"],
-                ytb_cookies_file,
-                "youtube.com",
-            )
-            self.config["ytb_cookies_file"] = str(ytb_cookies_file)
-            self.config.save_config()
-        # 加载资源
+        # 加载x渲染器资源
         await asyncio.to_thread(Renderer.load_resources)
         # 注册解析器
         self._register_parser()
@@ -161,121 +120,6 @@ class ParserPlugin(Star):
             if isinstance(parser, parser_type):
                 return parser
         raise ValueError(f"未找到类型为 {parser_type} 的 parser 实例")
-
-    def _build_send_plan(self, result: ParseResult):
-        light_contents = []
-        heavy_contents = []
-
-        for cont in chain(
-            result.contents, result.repost.contents if result.repost else ()
-        ):
-            match cont:
-                case ImageContent() | GraphicsContent():
-                    light_contents.append(cont)
-                case VideoContent() | AudioContent() | FileContent() | DynamicContent():
-                    heavy_contents.append(cont)
-                case _:
-                    light_contents.append(cont)
-
-        heavy_count = len(heavy_contents)
-        light_count = len(light_contents)
-
-        base_seg_count = heavy_count + light_count
-
-        is_single_heavy = heavy_count == 1 and light_count == 0
-
-        render_card = is_single_heavy and self.config.get(
-            "single_heavy_render_card", False
-        )
-
-        final_seg_count = base_seg_count + (1 if render_card else 0)
-        force_merge = final_seg_count >= self.config["forward_threshold"]
-
-        return {
-            "light": light_contents,
-            "heavy": heavy_contents,
-            "render_card": render_card,
-            "force_merge": force_merge,
-            "preview_card": render_card and not force_merge,
-        }
-
-    async def _send_parse_result(
-        self,
-        event: AstrMessageEvent,
-        result: ParseResult,
-    ):
-        plan = self._build_send_plan(result)
-
-        segs: list[BaseMessageComponent] = []
-        show_download_fail_tip = self.config.get("show_download_fail_tip", True)
-
-        # 预览卡片（单重媒体 + 不合并）
-        if plan["preview_card"]:
-            if image_path := await self.renderer.render_card(result):
-                await event.send(event.chain_result([Image(str(image_path))]))
-
-        # inline 卡片（合并时）
-        if plan["render_card"] and plan["force_merge"]:
-            if image_path := await self.renderer.render_card(result):
-                segs.append(Image(str(image_path)))
-
-        # 轻媒体
-        for cont in plan["light"]:
-            try:
-                path: Path = await cont.get_path()
-            except (DownloadLimitException, ZeroSizeException):
-                continue
-            except DownloadException:
-                if show_download_fail_tip:
-                    segs.append(Plain("此项媒体下载失败"))
-                continue
-
-            match cont:
-                case ImageContent():
-                    segs.append(Image(str(path)))
-                case GraphicsContent() as g:
-                    segs.append(Image(str(path)))
-                    if g.text:
-                        segs.append(Plain(g.text))
-                    if g.alt:
-                        segs.append(Plain(g.alt))
-
-        # 重媒体
-        for cont in plan["heavy"]:
-            try:
-                path: Path = await cont.get_path()
-            except SizeLimitException:
-                if show_download_fail_tip:
-                    segs.append(Plain("超过文件大小限制"))
-                continue
-            except DownloadException:
-                if show_download_fail_tip:
-                    segs.append(Plain("此项媒体下载失败"))
-                continue
-
-            match cont:
-                case VideoContent() | DynamicContent():
-                    segs.append(Video(str(path)))
-                case AudioContent():
-                    segs.append(
-                        File(name=path.name, file=str(path))
-                        if self.config["audio_to_file"]
-                        else Record(str(path))
-                    )
-                case FileContent():
-                    segs.append(File(name=path.name, file=str(path)))
-
-        # 强制合并
-        if plan["force_merge"] and segs:
-            nodes = Nodes([])
-            self_id = event.get_self_id()
-            for seg in segs:
-                nodes.nodes.append(Node(uin=self_id, name="解析器", content=[seg]))
-            segs = [nodes]
-
-        # 发送
-        if segs:
-            await event.send(event.chain_result(segs))
 
     @filter.event_message_type(filter.EventMessageType.ALL)
     async def on_message(self, event: AstrMessageEvent):
@@ -340,81 +184,23 @@ class ParserPlugin(Star):
                 return
             logger.debug("Bot在仲裁中胜出, 准备解析...")
 
-        # 防抖机制：避免短时间重复处理同一链接
+        # 基于link防抖
         link = searched.group(0)
-        if self.config["debounce_interval"] and self.debouncer.hit(umo, link):
-            logger.warning(f"[防抖] 链接 {link} 在防抖时间内，跳过解析")
+        if self.debouncer.hit_link(umo, link):
+            logger.warning(f"[链接防抖] 链接 {link} 在防抖时间内，跳过解析")
             return
 
         # 解析
         parse_res = await self.parser_map[keyword].parse(keyword, searched)
 
+        # 基于资源ID防抖
+        resource_id = parse_res.get_resource_id()
+        if self.debouncer.hit_resource(umo, resource_id):
+            logger.warning(f"[资源防抖] 资源 {resource_id} 在防抖时间内，跳过发送")
+            return
+
         # 发送
-        await self._send_parse_result(event, parse_res)
-
-    @filter.permission_type(filter.PermissionType.ADMIN)
-    @filter.command("bm")
-    async def bm(self, event: AstrMessageEvent):
-        """获取B站的音频"""
-        text = event.message_str
-        matched = re.search(r"(BV[A-Za-z0-9]{10})(\s\d{1,3})?", text)
-        if not matched:
-            yield event.plain_result("请发送正确的 BV 号")
-            return
-
-        bvid, page_num = matched.group(1), matched.group(2)
-        page_idx = int(page_num) if page_num else 0
-
-        parser: BilibiliParser = self._get_parser_by_type(BilibiliParser)  # type: ignore
-
-        _, audio_url = await parser.extract_download_urls(
-            bvid=bvid, page_index=page_idx
-        )
-        if not audio_url:
-            yield event.plain_result("未找到可下载的音频")
-            return
-
-        audio_path = await self.downloader.download_audio(
-            audio_url,
-            audio_name=f"{bvid}-{page_idx}.mp3",
-            ext_headers=parser.headers,
-            proxy=parser.proxy,
-        )
-        yield event.chain_result([Record(audio_path)])  # type: ignore
-
-        if self.config["upload_audio"]:
-            pass
-
-    @filter.permission_type(filter.PermissionType.ADMIN)
-    @filter.command("ym")
-    async def ym(self, event: AstrMessageEvent):
-        """获取油管的音频"""
-        text = event.message_str
-        parser = self._get_parser_by_type(YouTubeParser)
-        _, matched = parser.search_url(text)
-        if not matched:
-            yield event.plain_result("请发送正确的油管链接")
-            return
-
-        url = matched.group(0)
-
-        audio_path = await self.downloader.download_audio(
-            url, use_ytdlp=True, proxy=parser.proxy
-        )
-        yield event.chain_result([Record(audio_path)])  # type: ignore
-
-        if self.config["upload_audio"]:
-            pass
-
-    @filter.permission_type(filter.PermissionType.ADMIN)
-    @filter.command("登录B站", alias={"blogin", "登录b站"})
-    async def login_bilibili(self, event: AstrMessageEvent):
-        """扫码登录B站"""
-        parser: BilibiliParser = self._get_parser_by_type(BilibiliParser)  # type: ignore
-        qrcode = await parser.login_with_qrcode()
-        yield event.chain_result([Image.fromBytes(qrcode)])
-        async for msg in parser.check_qr_state():
-            yield event.plain_result(msg)
+        await self.sender.send_parse_result(event, parse_res)
 
     @filter.command("开启解析")
     async def open_parser(self, event: AstrMessageEvent):
@@ -437,3 +223,13 @@ class ParserPlugin(Star):
             yield event.plain_result("解析已关闭")
         else:
             yield event.plain_result("解析已关闭，无需重复关闭")
+
+    @filter.permission_type(filter.PermissionType.ADMIN)
+    @filter.command("登录B站", alias={"blogin", "登录b站"})
+    async def login_bilibili(self, event: AstrMessageEvent):
+        """扫码登录B站"""
+        parser: BilibiliParser = self._get_parser_by_type(BilibiliParser)  # type: ignore
+        qrcode = await parser.login_with_qrcode()
+        yield event.chain_result([Image.fromBytes(qrcode)])
+        async for msg in parser.check_qr_state():
+            yield event.plain_result(msg)
