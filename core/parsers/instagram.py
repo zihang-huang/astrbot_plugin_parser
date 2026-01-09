@@ -36,6 +36,26 @@ class InstagramParser(BaseParser):
         save_cookies_with_netscape(ig_ck, cookies_file, "instagram.com")
         return cookies_file
 
+    async def _fetch_og_meta(self, url: str) -> dict[str, str]:
+        async with self.client.get(
+            url, headers=self.headers, allow_redirects=True, proxy=self.proxy
+        ) as resp:
+            if resp.status >= 400:
+                raise ParseException(f"获取页面失败 {resp.status}")
+            html = await resp.text()
+
+        def _match(prop: str) -> str | None:
+            pattern = rf'<meta[^>]+property="{prop}"[^>]+content="([^"]+)"'
+            if matched := re.search(pattern, html):
+                return matched.group(1)
+            return None
+
+        return {
+            "image": _match("og:image") or "",
+            "video": _match("og:video") or "",
+            "title": _match("og:title") or "",
+        }
+
     async def _extract_info(self, url: str) -> dict[str, Any]:
         retries = 2
         last_exc: Exception | None = None
@@ -205,7 +225,22 @@ class InstagramParser(BaseParser):
         url = searched.group(0)
         final_url = await self.get_final_url(url, headers=self.headers)
         is_video_url = any(key in final_url for key in ("/reel/", "/reels/", "/tv/"))
-        info = await self._extract_info(final_url)
+        try:
+            info = await self._extract_info(final_url)
+        except ParseException:
+            og = await self._fetch_og_meta(final_url)
+            if og_image := og.get("image"):
+                image_task = self.downloader.download_img(
+                    og_image,
+                    ext_headers=self.headers,
+                    proxy=self.proxy,
+                )
+                return self.result(
+                    title=og.get("title") or None,
+                    contents=[ImageContent(image_task)],
+                    url=final_url,
+                )
+            raise
         entries = self._iter_entries(info)
 
         contents = []
