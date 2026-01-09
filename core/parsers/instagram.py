@@ -31,7 +31,7 @@ class InstagramParser(BaseParser):
         self._cookies_file = self._init_cookies()
 
     def _init_cookies(self) -> Path | None:
-        ig_ck = self.config.get("ig_ck", "")
+        ig_ck = (self.config.get("ig_ck", "") or "").replace("\r", "").replace("\n", "")
         if not ig_ck:
             return None
         self.headers["Cookie"] = ig_ck
