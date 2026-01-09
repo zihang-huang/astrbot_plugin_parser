@@ -34,6 +34,7 @@ class InstagramParser(BaseParser):
         ig_ck = self.config.get("ig_ck", "")
         if not ig_ck:
             return None
+        self.headers["Cookie"] = ig_ck
         cookies_file = self.data_dir / "ig_cookies.txt"
         cookies_file.parent.mkdir(parents=True, exist_ok=True)
         save_cookies_with_netscape(ig_ck, cookies_file, "instagram.com")
@@ -307,6 +308,10 @@ class InstagramParser(BaseParser):
         suffix = Path(urlparse(url).path).suffix
         return suffix if suffix else default
 
+    @staticmethod
+    def _image_variant(url: str) -> str:
+        return "crop" if ("s640x640" in url or "stp=" in url) else "full"
+
     @classmethod
     def _pick_formats(
         cls, info: dict[str, Any]
@@ -397,11 +402,10 @@ class InstagramParser(BaseParser):
         except ParseException:
             og = await self._fetch_og_meta(final_url)
             if og_image := og.get("image"):
-                image_name = (
-                    f"{base_prefix}{self._url_suffix(og_image, '.jpg')}"
-                    if shortcode
-                    else None
-                )
+                image_name = None
+                if shortcode:
+                    variant = self._image_variant(og_image)
+                    image_name = f"{base_prefix}_{variant}{self._url_suffix(og_image, '.jpg')}"
                 image_task = self.downloader.download_img(
                     og_image,
                     img_name=image_name,
@@ -435,7 +439,8 @@ class InstagramParser(BaseParser):
             if video_url:
                 cover_task = None
                 if thumbnail:
-                    cover_name = f"{base_name}_cover{self._url_suffix(thumbnail, '.jpg')}"
+                    cover_variant = self._image_variant(thumbnail)
+                    cover_name = f"{base_name}_cover_{cover_variant}{self._url_suffix(thumbnail, '.jpg')}"
                     cover_task = self.downloader.download_img(
                         thumbnail,
                         img_name=cover_name,
@@ -501,7 +506,8 @@ class InstagramParser(BaseParser):
                     image_url = await self._upgrade_image_url(
                         image_url, entry_shortcode or shortcode
                     )
-                    image_name = f"{base_name}{self._url_suffix(image_url, '.jpg')}"
+                    variant = self._image_variant(image_url)
+                    image_name = f"{base_name}_{variant}{self._url_suffix(image_url, '.jpg')}"
                     image_task = self.downloader.download_img(
                         image_url,
                         img_name=image_name,
@@ -523,7 +529,8 @@ class InstagramParser(BaseParser):
                     duration = float(meta.get("duration") or 0)
                     cover_task = None
                     if thumbnail:
-                        cover_name = f"{base_prefix}_cover{self._url_suffix(thumbnail, '.jpg')}"
+                        cover_variant = self._image_variant(thumbnail)
+                        cover_name = f"{base_prefix}_cover_{cover_variant}{self._url_suffix(thumbnail, '.jpg')}"
                         cover_task = self.downloader.download_img(
                             thumbnail,
                             img_name=cover_name,
@@ -541,7 +548,8 @@ class InstagramParser(BaseParser):
                 image_url = self._pick_image_url(meta)
                 if isinstance(image_url, str) and image_url:
                     image_url = await self._upgrade_image_url(image_url, shortcode)
-                    image_name = f"{base_prefix}{self._url_suffix(image_url, '.jpg')}"
+                    variant = self._image_variant(image_url)
+                    image_name = f"{base_prefix}_{variant}{self._url_suffix(image_url, '.jpg')}"
                     image_task = self.downloader.download_img(
                         image_url,
                         img_name=image_name,
