@@ -39,7 +39,11 @@ class InstagramParser(BaseParser):
     async def _extract_info(self, url: str) -> dict[str, Any]:
         retries = 2
         last_exc: Exception | None = None
-        opts: dict[str, Any] = {"quiet": True, "skip_download": True}
+        opts: dict[str, Any] = {
+            "quiet": True,
+            "skip_download": True,
+            "ignore_no_formats": True,
+        }
         if self.proxy:
             opts["proxy"] = self.proxy
         if self._cookies_file and self._cookies_file.is_file():
@@ -200,20 +204,22 @@ class InstagramParser(BaseParser):
     async def _parse(self, searched: re.Match[str]):
         url = searched.group(0)
         final_url = await self.get_final_url(url, headers=self.headers)
+        is_video_url = any(key in final_url for key in ("/reel/", "/reels/", "/tv/"))
         info = await self._extract_info(final_url)
         entries = self._iter_entries(info)
 
         contents = []
         meta_entry: dict[str, Any] | None = None
+        fallback_video_tried = False
         for entry in entries:
             video_fmt, audio_fmt = self._pick_formats(entry)
             video_url = self._format_url(video_fmt) if video_fmt else None
             audio_url = self._format_url(audio_fmt) if audio_fmt else None
             image_url = None if video_url else self._pick_image_url(entry)
-            if not video_url and not image_url:
-                continue
             thumbnail = entry.get("thumbnail")
             duration = float(entry.get("duration") or 0)
+            if not video_url and not image_url and not (is_video_url and thumbnail):
+                continue
             if video_url:
                 cover_task = None
                 if thumbnail:
@@ -244,32 +250,66 @@ class InstagramParser(BaseParser):
                         proxy=self.proxy,
                     )
                     contents.append(VideoContent(video_task, cover_task, duration))
-            elif image_url:
-                image_task = self.downloader.download_img(
-                    image_url,
-                    ext_headers=self.headers,
-                    proxy=self.proxy,
-                )
-                contents.append(ImageContent(image_task))
+            elif image_url or (is_video_url and thumbnail):
+                cover_task = None
+                if thumbnail:
+                    cover_task = self.downloader.download_img(
+                        thumbnail,
+                        ext_headers=self.headers,
+                        proxy=self.proxy,
+                    )
+                if is_video_url and not fallback_video_tried:
+                    fallback_video_tried = True
+                    try:
+                        video_task = await self._download_with_ytdlp(final_url)
+                        contents.append(VideoContent(video_task, cover_task, duration))
+                        if meta_entry is None:
+                            meta_entry = entry
+                        continue
+                    except ParseException:
+                        pass
+                if image_url:
+                    image_task = self.downloader.download_img(
+                        image_url,
+                        ext_headers=self.headers,
+                        proxy=self.proxy,
+                    )
+                    contents.append(ImageContent(image_task))
+                elif thumbnail:
+                    contents.append(ImageContent(cover_task))
             if meta_entry is None:
                 meta_entry = entry
 
         meta = meta_entry or info
         if not contents:
             fallback_url = meta.get("webpage_url") or final_url
-            if not isinstance(fallback_url, str) or not fallback_url:
+            if is_video_url and not fallback_video_tried:
+                try:
+                    thumbnail = meta.get("thumbnail")
+                    duration = float(meta.get("duration") or 0)
+                    cover_task = None
+                    if thumbnail:
+                        cover_task = self.downloader.download_img(
+                            thumbnail,
+                            ext_headers=self.headers,
+                            proxy=self.proxy,
+                        )
+                    if isinstance(fallback_url, str) and fallback_url:
+                        video_task = await self._download_with_ytdlp(fallback_url)
+                        contents.append(VideoContent(video_task, cover_task, duration))
+                except ParseException:
+                    pass
+            if not contents:
+                image_url = self._pick_image_url(meta)
+                if isinstance(image_url, str) and image_url:
+                    image_task = self.downloader.download_img(
+                        image_url,
+                        ext_headers=self.headers,
+                        proxy=self.proxy,
+                    )
+                    contents.append(ImageContent(image_task))
+            if not contents:
                 raise ParseException("未找到可下载的视频")
-            thumbnail = meta.get("thumbnail")
-            duration = float(meta.get("duration") or 0)
-            cover_task = None
-            if thumbnail:
-                cover_task = self.downloader.download_img(
-                    thumbnail,
-                    ext_headers=self.headers,
-                    proxy=self.proxy,
-                )
-            video_task = await self._download_with_ytdlp(fallback_url)
-            contents.append(VideoContent(video_task, cover_task, duration))
         author_name = None
         for key in ("uploader", "uploader_id", "channel"):
             val = meta.get(key)
