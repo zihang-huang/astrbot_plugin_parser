@@ -57,27 +57,27 @@ class MessageSender:
         Returns the path with file:/// prefix as required by OneBot.
         """
         mapping = self.config.get("path_mapping", "")
-        if not mapping or "=>" not in mapping:
-            return local_path
-
-        container_prefix, host_prefix = mapping.split("=>", 1)
-        container_prefix = container_prefix.strip().replace("\\", "/")
-        host_prefix = host_prefix.strip()
-
+        
+        # Normalize slashes
         local_path_normalized = local_path.replace("\\", "/")
+        new_path = local_path_normalized
 
-        if local_path_normalized.startswith(container_prefix):
-            new_path = local_path_normalized.replace(container_prefix, host_prefix, 1)
-            new_path = new_path.replace("\\", "/")
+        if mapping and "=>" in mapping:
+            container_prefix, host_prefix = mapping.split("=>", 1)
+            container_prefix = container_prefix.strip().replace("\\", "/")
+            host_prefix = host_prefix.strip()
 
-            if not new_path.startswith("file://"):
-                if new_path.startswith("/"):
-                    new_path = f"file://{new_path}"
-                else:
-                    new_path = f"file:///{new_path}"
-            return new_path
+            if local_path_normalized.startswith(container_prefix):
+                new_path = local_path_normalized.replace(container_prefix, host_prefix, 1)
+                new_path = new_path.replace("\\", "/")
 
-        return local_path
+        if not new_path.startswith(("file://", "http://", "https://", "base64://")):
+            if new_path.startswith("/"):
+                new_path = f"file://{new_path}"
+            elif ":" in new_path and new_path[0].isalpha(): # Windows drive
+                new_path = f"file:///{new_path}"
+                
+        return new_path
 
     def _build_send_plan(self, result: ParseResult) -> dict:
         """

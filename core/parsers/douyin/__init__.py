@@ -28,6 +28,10 @@ class DouyinParser(BaseParser):
         super().__init__(config, downloader)
         self.douyin_ck = config.get("douyin_ck", "")
         self._cookies_file = Path(config["data_dir"]) / "douyin_cookies.json"
+        
+        self.ios_headers["Referer"] = "https://www.douyin.com/"
+        self.android_headers["Referer"] = "https://www.douyin.com/"
+        
         self._load_cookies()
         if self.douyin_ck:
             self._set_cookies(self.douyin_ck)
