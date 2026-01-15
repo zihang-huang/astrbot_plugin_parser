@@ -51,6 +51,34 @@ class MessageSender:
         self.config = config
         self.renderer = renderer
 
+    def _translate_path(self, local_path: str) -> str:
+        """
+        Translates the internal container path to the host path if configured.
+        Returns the path with file:/// prefix as required by OneBot.
+        """
+        mapping = self.config.get("path_mapping", "")
+        if not mapping or "=>" not in mapping:
+            return local_path
+
+        container_prefix, host_prefix = mapping.split("=>", 1)
+        container_prefix = container_prefix.strip().replace("\\", "/")
+        host_prefix = host_prefix.strip()
+
+        local_path_normalized = local_path.replace("\\", "/")
+
+        if local_path_normalized.startswith(container_prefix):
+            new_path = local_path_normalized.replace(container_prefix, host_prefix, 1)
+            new_path = new_path.replace("\\", "/")
+
+            if not new_path.startswith("file://"):
+                if new_path.startswith("/"):
+                    new_path = f"file://{new_path}"
+                else:
+                    new_path = f"file:///{new_path}"
+            return new_path
+
+        return local_path
+
     def _build_send_plan(self, result: ParseResult) -> dict:
         """
         根据解析结果生成发送计划（plan）
@@ -112,7 +140,7 @@ class MessageSender:
             return
 
         if image_path := await self.renderer.render_card(result):
-            await event.send(event.chain_result([Image(str(image_path))]))
+            await event.send(event.chain_result([Image(self._translate_path(str(image_path)))]))
 
 
     async def _build_segments(
@@ -132,7 +160,7 @@ class MessageSender:
         # 合并转发时，卡片以内联形式作为一个消息段参与合并
         if plan["render_card"] and plan["force_merge"]:
             if image_path := await self.renderer.render_card(result):
-                segs.append(Image(str(image_path)))
+                segs.append(Image(self._translate_path(str(image_path))))
 
         # 轻媒体处理
         for cont in plan["light"]:
@@ -147,9 +175,9 @@ class MessageSender:
 
             match cont:
                 case ImageContent():
-                    segs.append(Image(str(path)))
+                    segs.append(Image(self._translate_path(str(path))))
                 case GraphicsContent() as g:
-                    segs.append(Image(str(path)))
+                    segs.append(Image(self._translate_path(str(path))))
                     # GraphicsContent 允许携带补充文本
                     if g.text:
                         segs.append(Plain(g.text))
@@ -170,15 +198,15 @@ class MessageSender:
 
             match cont:
                 case VideoContent() | DynamicContent():
-                    segs.append(Video(str(path)))
+                    segs.append(Video(self._translate_path(str(path))))
                 case AudioContent():
                     segs.append(
-                        File(name=path.name, file=str(path))
+                        File(name=path.name, file=self._translate_path(str(path)))
                         if self.config["audio_to_file"]
-                        else Record(str(path))
+                        else Record(self._translate_path(str(path)))
                     )
                 case FileContent():
-                    segs.append(File(name=path.name, file=str(path)))
+                    segs.append(File(name=path.name, file=self._translate_path(str(path))))
 
         return segs
 

@@ -127,6 +127,12 @@
         },
         "default": 15
     },
+    "path_mapping": {
+        "description": "Docker 路径映射",
+        "hint": "格式：/container/path=>/host/path。例如 /AstrBot/data=>D:/Bot/data。用于解决 Docker 部署时发不出本地文件的问题",
+        "type": "string",
+        "default": ""
+    },
     "bili_ck": {
         "description": "Bilibili Cookies",
         "hint": "用于B站解析的登录Cookies，留空则使用无登录状态",
